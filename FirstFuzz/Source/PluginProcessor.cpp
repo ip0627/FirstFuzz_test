@@ -16,6 +16,7 @@ namespace
     static constexpr auto gateParamId = "gate";
     static constexpr auto toneParamId = "tone";
     static constexpr auto volumeParamId = "volume";
+    static constexpr auto inputChannelParamId = "inputChannel";
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout FirstFuzzAudioProcessor::createParameterLayout()
@@ -42,6 +43,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout FirstFuzzAudioProcessor::cre
         params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { volumeParamId, 1 }, "Volume", range, 0.8f));
     }
 
+    {
+        juce::StringArray choices { "Left", "Right", "Both" };
+        params.push_back (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { inputChannelParamId, 1 }, "Input Channel", choices, 2));
+    }
+
     return { params.begin(), params.end() };
 }
 
@@ -65,6 +71,7 @@ FirstFuzzAudioProcessor::FirstFuzzAudioProcessor()
     gateParameter = parameters.getRawParameterValue (gateParamId);
     toneParameter = parameters.getRawParameterValue (toneParamId);
     volumeParameter = parameters.getRawParameterValue (volumeParamId);
+    inputChannelParameter = dynamic_cast<juce::AudioParameterChoice*> (parameters.getParameter (inputChannelParamId));
 }
 
 FirstFuzzAudioProcessor::~FirstFuzzAudioProcessor()
@@ -142,6 +149,8 @@ void FirstFuzzAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBl
 
     currentSampleRate = sampleRate;
     toneFilterState = { 0.0f, 0.0f };
+
+    setLatencySamples (0);
 }
 
 void FirstFuzzAudioProcessor::releaseResources()
@@ -206,11 +215,12 @@ void FirstFuzzAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     const auto gateThreshold = juce::jmap (gate, 0.0f, 1.0f, 0.001f, 0.2f);
     const auto sampleRate = static_cast<float> (juce::jmax (1.0, currentSampleRate));
     const auto alpha = std::exp (-2.0f * juce::MathConstants<float>::pi * tone / sampleRate);
+    const auto inputMode = inputChannelParameter != nullptr ? inputChannelParameter->getIndex() : 2;
 
-    for (int channel = 0; channel < totalNumInputChannels; ++channel)
+    auto processChannel = [&] (int chIndex)
     {
-        auto* channelData = buffer.getWritePointer (channel);
-        auto& state = toneFilterState[static_cast<size_t> (juce::jmin (channel, 1))];
+        auto* channelData = buffer.getWritePointer (chIndex);
+        auto& state = toneFilterState[static_cast<size_t> (juce::jmin (chIndex, 1))];
 
         for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
         {
@@ -223,6 +233,35 @@ void FirstFuzzAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
             const auto toned = state;
             channelData[sample] = toned * volume;
         }
+    };
+
+    if (inputMode == 0)
+    {
+        // Left only
+        processChannel (0);
+        if (totalNumOutputChannels > 1)
+            buffer.copyFrom (1, 0, buffer, 0, 0, buffer.getNumSamples());
+    }
+    else if (inputMode == 1)
+    {
+        // Right only
+        if (totalNumInputChannels > 1)
+        {
+            processChannel (1);
+            buffer.copyFrom (0, 0, buffer, 1, 0, buffer.getNumSamples());
+        }
+        else
+        {
+            processChannel (0);
+            if (totalNumOutputChannels > 1)
+                buffer.copyFrom (1, 0, buffer, 0, 0, buffer.getNumSamples());
+        }
+    }
+    else
+    {
+        // Both channels
+        for (int channel = 0; channel < totalNumInputChannels; ++channel)
+            processChannel (channel);
     }
 }
 

@@ -26,6 +26,11 @@ public:
 
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
+
+    juce::ComboBox inputChannelCombo;
+    juce::Label inputChannelLabel;
+    std::unique_ptr<ComboBoxAttachment> inputChannelAttachment;
 
     juce::Slider gainSlider;
     juce::Slider gateSlider;
