@@ -65,6 +65,7 @@ private:
     std::atomic<float>* gateParameter = nullptr;
     std::atomic<float>* toneParameter = nullptr;
     std::atomic<float>* volumeParameter = nullptr;
+    juce::AudioParameterChoice* inputChannelParameter = nullptr;
 
     std::array<float, 2> toneFilterState { 0.0f, 0.0f };
     double currentSampleRate = 44100.0;
