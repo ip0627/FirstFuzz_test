@@ -1,4 +1,4 @@
-/*
+﻿/*
   ==============================================================================
 
     This file contains the basic framework code for a JUCE plugin editor.
@@ -25,6 +25,23 @@ public:
     void resized() override;
 
 private:
+    using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
+
+    juce::Slider gainSlider;
+    juce::Slider gateSlider;
+    juce::Slider toneSlider;
+    juce::Slider volumeSlider;
+
+    juce::Label gainLabel;
+    juce::Label gateLabel;
+    juce::Label toneLabel;
+    juce::Label volumeLabel;
+
+    std::unique_ptr<SliderAttachment> gainAttachment;
+    std::unique_ptr<SliderAttachment> gateAttachment;
+    std::unique_ptr<SliderAttachment> toneAttachment;
+    std::unique_ptr<SliderAttachment> volumeAttachment;
+
     // This reference is provided as a quick way for your editor to
     // access the processor object that created it.
     FirstFuzzAudioProcessor& audioProcessor;

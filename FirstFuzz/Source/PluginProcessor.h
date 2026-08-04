@@ -1,4 +1,4 @@
-/*
+﻿/*
   ==============================================================================
 
     This file contains the basic framework code for a JUCE plugin processor.
@@ -9,6 +9,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <array>
 
 //==============================================================================
 /**
@@ -53,7 +54,21 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
+    juce::AudioProcessorValueTreeState& getValueTreeState() { return parameters; }
+
 private:
+    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+
+    juce::AudioProcessorValueTreeState parameters;
+
+    std::atomic<float>* gainParameter = nullptr;
+    std::atomic<float>* gateParameter = nullptr;
+    std::atomic<float>* toneParameter = nullptr;
+    std::atomic<float>* volumeParameter = nullptr;
+
+    std::array<float, 2> toneFilterState { 0.0f, 0.0f };
+    double currentSampleRate = 44100.0;
+
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FirstFuzzAudioProcessor)
 };

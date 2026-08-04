@@ -1,4 +1,4 @@
-/*
+﻿/*
   ==============================================================================
 
     This file contains the basic framework code for a JUCE plugin processor.
@@ -8,6 +8,42 @@
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <cmath>
+
+namespace
+{
+    static constexpr auto gainParamId = "gain";
+    static constexpr auto gateParamId = "gate";
+    static constexpr auto toneParamId = "tone";
+    static constexpr auto volumeParamId = "volume";
+}
+
+juce::AudioProcessorValueTreeState::ParameterLayout FirstFuzzAudioProcessor::createParameterLayout()
+{
+    std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
+
+    {
+        auto range = juce::NormalisableRange<float> (1.0f, 40.0f, 0.01f, 0.4f);
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { gainParamId, 1 }, "Gain", range, 8.0f));
+    }
+
+    {
+        auto range = juce::NormalisableRange<float> (0.0f, 1.0f, 0.0001f, 1.0f);
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { gateParamId, 1 }, "Gate", range, 0.08f));
+    }
+
+    {
+        auto range = juce::NormalisableRange<float> (200.0f, 12000.0f, 1.0f, 0.5f);
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { toneParamId, 1 }, "Tone", range, 4000.0f));
+    }
+
+    {
+        auto range = juce::NormalisableRange<float> (0.0f, 1.0f, 0.0001f, 1.0f);
+        params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { volumeParamId, 1 }, "Volume", range, 0.8f));
+    }
+
+    return { params.begin(), params.end() };
+}
 
 //==============================================================================
 FirstFuzzAudioProcessor::FirstFuzzAudioProcessor()
@@ -19,9 +55,16 @@ FirstFuzzAudioProcessor::FirstFuzzAudioProcessor()
                       #endif
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
                      #endif
-                       )
+                       ),
+       parameters (*this, nullptr, "PARAMETERS", createParameterLayout())
+#else
+     : parameters (*this, nullptr, "PARAMETERS", createParameterLayout())
 #endif
 {
+    gainParameter = parameters.getRawParameterValue (gainParamId);
+    gateParameter = parameters.getRawParameterValue (gateParamId);
+    toneParameter = parameters.getRawParameterValue (toneParamId);
+    volumeParameter = parameters.getRawParameterValue (volumeParamId);
 }
 
 FirstFuzzAudioProcessor::~FirstFuzzAudioProcessor()
@@ -95,6 +138,10 @@ void FirstFuzzAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBl
 {
     // Use this method as the place to do any pre-playback
     // initialisation that you need..
+    juce::ignoreUnused (samplesPerBlock);
+
+    currentSampleRate = sampleRate;
+    toneFilterState = { 0.0f, 0.0f };
 }
 
 void FirstFuzzAudioProcessor::releaseResources()
@@ -132,6 +179,8 @@ bool FirstFuzzAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts
 void FirstFuzzAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
+    juce::ignoreUnused (midiMessages);
+
     auto totalNumInputChannels  = getTotalNumInputChannels();
     auto totalNumOutputChannels = getTotalNumOutputChannels();
 
@@ -150,11 +199,30 @@ void FirstFuzzAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     // the samples and the outer loop is handling the channels.
     // Alternatively, you can process the samples with the channels
     // interleaved by keeping the same state.
+    const auto gain = gainParameter != nullptr ? gainParameter->load() : 8.0f;
+    const auto gate = gateParameter != nullptr ? gateParameter->load() : 0.08f;
+    const auto tone = toneParameter != nullptr ? toneParameter->load() : 4000.0f;
+    const auto volume = volumeParameter != nullptr ? volumeParameter->load() : 0.8f;
+    const auto gateThreshold = juce::jmap (gate, 0.0f, 1.0f, 0.001f, 0.2f);
+    const auto sampleRate = static_cast<float> (juce::jmax (1.0, currentSampleRate));
+    const auto alpha = std::exp (-2.0f * juce::MathConstants<float>::pi * tone / sampleRate);
+
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
         auto* channelData = buffer.getWritePointer (channel);
+        auto& state = toneFilterState[static_cast<size_t> (juce::jmin (channel, 1))];
 
-        // ..do something to the data...
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+        {
+            auto fuzzed = std::tanh (channelData[sample] * gain);
+
+            if (std::abs (fuzzed) < gateThreshold)
+                fuzzed = 0.0f;
+
+            state = ((1.0f - alpha) * fuzzed) + (alpha * state);
+            const auto toned = state;
+            channelData[sample] = toned * volume;
+        }
     }
 }
 
@@ -172,15 +240,14 @@ juce::AudioProcessorEditor* FirstFuzzAudioProcessor::createEditor()
 //==============================================================================
 void FirstFuzzAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    // You should use this method to store your parameters in the memory block.
-    // You could do that either as raw data, or use the XML or ValueTree classes
-    // as intermediaries to make it easy to save and load complex data.
+    if (auto state = parameters.copyState().createXml())
+        copyXmlToBinary (*state, destData);
 }
 
 void FirstFuzzAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    // You should use this method to restore your parameters from this memory block,
-    // whose contents will have been created by the getStateInformation() call.
+    if (auto state = getXmlFromBinary (data, sizeInBytes))
+        parameters.replaceState (juce::ValueTree::fromXml (*state));
 }
 
 //==============================================================================
